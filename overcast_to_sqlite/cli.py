@@ -8,7 +8,11 @@ import click
 import requests
 
 from overcast_to_sqlite.chapters_backfill import backfill_all_chapters
-from overcast_to_sqlite.html.page import generate_html_played
+from overcast_to_sqlite.html.page import (
+    generate_html_deleted,
+    generate_html_played,
+    generate_html_starred,
+)
 
 from .constants import BATCH_SIZE, TITLE
 from .datastore import Datastore
@@ -35,6 +39,17 @@ def cli() -> None:
     """Save listening history and feed/episode info from Overcast to SQLite."""
 
 
+def _run_auth_flow(auth_path: str) -> None:
+    click.echo("Please login to Overcast")
+    click.echo(
+        f"Your password is not stored but an auth cookie will be saved to {auth_path}",
+    )
+    click.echo()
+    email = click.prompt("Email")
+    password = click.prompt("Password", hide_input=True)
+    auth_and_save_cookies(email, password, auth_path)
+
+
 @cli.command()
 @click.option(
     "-a",
@@ -46,14 +61,7 @@ def cli() -> None:
 )
 def auth(auth_path: str) -> None:
     """Save authentication credentials to a JSON file."""
-    click.echo("Please login to Overcast")
-    click.echo(
-        f"Your password is not stored but an auth cookie will be saved to {auth_path}",
-    )
-    click.echo()
-    email = click.prompt("Email")
-    password = click.prompt("Password")
-    auth_and_save_cookies(email, password, auth_path)
+    _run_auth_flow(auth_path)
 
 
 @cli.command()
@@ -102,20 +110,21 @@ def save(
 
     for playlist in extract_playlists_from_opml(root):
         if verbose:
-            print(f"▶️Saving playlist: {playlist['title']}")
+            print(f"▶️Saving playlist: {playlist.title}")
         db.save_playlist(playlist)
 
     for feed, episodes in extract_feed_and_episodes_from_opml(root):
         if not episodes:
             if verbose:
-                print(f"⚠️Skipping {feed[TITLE]} (no episodes)")
+                print(f"⚠️Skipping {feed.title} (no episodes)")
             continue
         if verbose:
-            print(f"⤵️Saving {feed[TITLE]} (latest: {episodes[0][TITLE]})")
-        ingested_feed_ids.add(feed["overcastId"])
+            print(f"⤵️Saving {feed.title} (latest: {episodes[0].title})")
+        ingested_feed_ids.add(feed.overcastId)
         db.save_feed_and_episodes(feed, episodes)
 
     db.mark_feed_removed_if_missing(ingested_feed_ids)
+    db.cleanup_old_episodes()
 
 
 def _auth_and_fetch(auth_path: str, archive: Path | None) -> str:
@@ -123,9 +132,19 @@ def _auth_and_fetch(auth_path: str, archive: Path | None) -> str:
         session = _session_from_cookie(cookie)
     else:
         if not Path(auth_path).exists():
-            auth(auth_path)
+            _run_auth_flow(auth_path)
         session = _session_from_json(auth_path)
     return fetch_opml(session, archive)
+
+
+def _html_output_dir(db_path: str, output_path: str | None) -> Path:
+    """Resolve the directory used by the html command output."""
+    if output_path is None:
+        return Path(db_path).parent
+
+    output_dir = Path(output_path)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    return output_dir
 
 
 @cli.command()
@@ -151,7 +170,7 @@ def extend(
     def _fetch_feed_extend_save(feed_url: tuple[str, str]) -> tuple[dict, list[dict]]:
         feed_title, url = feed_url
         title = _sanitize_for_path(feed_title)
-        feed, episodes, chapters = fetch_xml_and_extract(
+        feed, episodes, _ = fetch_xml_and_extract(
             xml_url=url,
             title=title,
             archive_dir=archive_dir,
@@ -299,16 +318,21 @@ def html(
     db_path: str,
     output_path: str | None,
 ) -> None:
-    """Download and store available chapters for all or starred episodes."""
-    if output_path:
-        if Path(output_path).is_dir():
-            html_output_path = Path(output_path) / "overcast-played.html"
-        else:
-            html_output_path = Path(output_path)
-    else:
-        html_output_path = Path(db_path).parent / "overcast-played.html"
-    generate_html_played(db_path, html_output_path)
-    print("📝Saved HTML to:", html_output_path.absolute())
+    """Generate HTML pages for recently played, starred, and deleted episodes."""
+    output_dir = _html_output_dir(db_path=db_path, output_path=output_path)
+
+    played_path = output_dir / "overcast-played.html"
+    starred_path = output_dir / "overcast-starred.html"
+    deleted_path = output_dir / "overcast-deleted.html"
+
+    generate_html_played(db_path, played_path)
+    generate_html_starred(db_path, starred_path)
+    generate_html_deleted(db_path, deleted_path)
+
+    print("📝Saved HTML files to:")
+    print(f"  Recently Played: file://{played_path.absolute()}")
+    print(f"  Starred Episodes: file://{starred_path.absolute()}")
+    print(f"  Deleted Episodes: file://{deleted_path.absolute()}")
 
 
 @cli.command("all")
@@ -359,6 +383,97 @@ def save_extend_download(
         db_path=db_path,
         archive_path=None,
     )
+
+
+def _format_duration(seconds: int) -> str:
+    """Format seconds as a human-readable duration string."""
+    hours, remainder = divmod(seconds, 3600)
+    minutes = remainder // 60
+    if hours > 0:
+        return f"{hours}h {minutes}m"
+    return f"{minutes}m"
+
+
+@cli.command()
+@click.argument(
+    "db_path",
+    type=click.Path(file_okay=True, dir_okay=False, allow_dash=False),
+    default="overcast.db",
+)
+def stats(db_path: str) -> None:
+    """Show listening statistics."""
+    db = Datastore(db_path)
+    listening_stats = db.get_listening_stats()
+
+    print("Listening Statistics")
+    print("=" * 40)
+    print(f"  Episodes played:      {listening_stats['episodes_played']:,}")
+    print(f"  Episodes starred:     {listening_stats['episodes_starred']:,}")
+    print(
+        f"  Total listening time: "
+        f"{_format_duration(listening_stats['total_progress_seconds'])}",
+    )
+    print(f"  Feeds subscribed:     {listening_stats['feeds_subscribed']:,}")
+    print(f"  Feeds removed:        {listening_stats['feeds_removed']:,}")
+
+    top_episodes = db.get_top_podcasts_by_episodes()
+    if top_episodes:
+        print()
+        print("Top Podcasts by Episodes Played")
+        print("-" * 40)
+        for i, (title, count) in enumerate(top_episodes, 1):
+            print(f"  {i:2}. {title:<30} {count:>5}")
+
+    top_time = db.get_top_podcasts_by_time()
+    if top_time:
+        print()
+        print("Top Podcasts by Listening Time")
+        print("-" * 40)
+        for i, (title, seconds) in enumerate(top_time, 1):
+            print(f"  {i:2}. {title:<30} {_format_duration(seconds):>10}")
+
+
+@cli.command()
+@click.argument("query")
+@click.argument(
+    "db_path",
+    type=click.Path(file_okay=True, dir_okay=False, allow_dash=False),
+    default="overcast.db",
+)
+@click.option(
+    "-l",
+    "--limit",
+    default=20,
+    type=int,
+    help="Maximum number of results per category",
+)
+def search(query: str, db_path: str, limit: int) -> None:
+    """Search episodes, feeds, and chapters using full-text search."""
+    db = Datastore(db_path)
+
+    episodes = db.search_episodes(query=query, limit=limit)
+    feeds = db.search_feeds(query=query, limit=limit)
+    chapters = db.search_chapters(query=query, limit=limit)
+
+    if not episodes and not feeds and not chapters:
+        print(f"No results found for '{query}'")
+        return
+
+    if episodes:
+        print(f"\nEpisodes ({len(episodes)} results)")
+        for ep_title, feed_title in episodes:
+            feed = feed_title or "Unknown"
+            print(f'  "{ep_title}" -- {feed}')
+
+    if feeds:
+        print(f"\nFeeds ({len(feeds)} results)")
+        for (feed_title,) in feeds:
+            print(f"  {feed_title}")
+
+    if chapters:
+        print(f"\nChapters ({len(chapters)} results)")
+        for (content,) in chapters:
+            print(f"  {content}")
 
 
 if __name__ == "__main__":

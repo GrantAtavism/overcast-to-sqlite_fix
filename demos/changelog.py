@@ -1,3 +1,5 @@
+# ruff: noqa: INP001
+
 from pathlib import Path
 
 from bs4 import BeautifulSoup
@@ -37,7 +39,7 @@ keywords = [
 ]
 
 
-def main():
+def main() -> None:  # noqa: C901, PLR0912
     pods = [
         _sanitize_for_path(x)
         for x in [
@@ -64,10 +66,10 @@ def main():
                 content = file.read_text()
                 soup = BeautifulSoup(content, "html.parser")
                 body = soup.find("body")
-                children = body.findChildren()
-                children = [
-                    (children[i], children[i + 1]) for i in range(0, len(children), 2)
-                ]
+                if body is None:
+                    continue
+                nodes = body.find_all()
+                children = list(zip(nodes[::2], nodes[1::2], strict=False))
 
                 prev_child = None
                 add_next = False
@@ -96,7 +98,7 @@ def main():
                     else:
                         prev_child = child
 
-    html = f'<!DOCTYPE html><html><head><title>Changelog ❤️ Silicon Valley ({total_quotes} times!)</title><meta charset="utf-8"></head><body>'
+    html = f'<!DOCTYPE html><html><head><title>Changelog ❤️ Silicon Valley ({total_quotes} times!)</title><meta charset="utf-8"></head><body>'  # noqa: E501
     for pod in pods:
         if pod in sv_quotes:
             html += f"<h1>{pod}</h1>"

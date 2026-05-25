@@ -3,27 +3,55 @@
 [![PyPI](https://img.shields.io/pypi/v/overcast-to-sqlite.svg)](https://pypi.org/project/overcast-to-sqlite/)
 [![Lint](https://github.com/hbmartin/overcast-to-sqlite/actions/workflows/lint.yml/badge.svg)](https://github.com/hbmartin/overcast-to-sqlite/actions/workflows/lint.yml)
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
-[![Code style: black](https://img.shields.io/badge/🐧️-black-000000.svg)](https://github.com/psf/black)
-[![Checked with pytype](https://img.shields.io/badge/🦆-pytype-437f30.svg)](https://google.github.io/pytype/)
+[![ty](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ty/main/assets/badge/v0.json)](https://github.com/astral-sh/ty)
 [![Versions](https://img.shields.io/pypi/pyversions/overcast-to-sqlite.svg)](https://pypi.python.org/pypi/overcast-to-sqlite)
-[![discord](https://img.shields.io/discord/823971286308356157?logo=discord&label=&color=323338)](https://discord.gg/EE7Hx4Kbny)
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/hbmartin/overcast-to-sqlite)
 [![twitter](https://img.shields.io/badge/@hmartin-00aced.svg?logo=twitter&logoColor=black)](https://twitter.com/hmartin)
 
 Save listening history and feed/episode info from Overcast to a SQLite database. Try exploring your podcast listening habits with [Datasette](https://datasette.io/)!
 
+If you simply want a page showing your recently listened episodes, try out the sister project [overcast-to-pages](https://github.com/hbmartin/overcast-to-pages-template).
+
 - [How to install](#how-to-install)
+- [Commands](#commands)
 - [Authentication](#authentication)
 - [Fetching and saving updates](#fetching-and-saving-updates)
 - [Extending and saving full feeds](#extending-and-saving-full-feeds)
 - [Downloading transcripts](#downloading-transcripts)
+- [Downloading chapters](#downloading-chapters)
+- [Generating HTML pages](#generating-html-pages)
+- [Running all commands](#running-all-commands)
+- [Listening statistics](#listening-statistics)
+- [Searching](#searching)
+- [Database schema](#database-schema)
+- [See also](#see-also)
+- [Development](#development)
 
 ## How to install
 
-    $ pip install overcast-to-sqlite
+Run it once without installing:
 
-Or to upgrade:
+    $ uvx overcast-to-sqlite
 
-    $ pip install --upgrade overcast-to-sqlite
+Install it permanently if you want `overcast-to-sqlite` available for later commands:
+
+    $ uv tool install overcast-to-sqlite
+
+## Commands
+
+| Command | Description |
+|---------|-------------|
+| `auth` | Save authentication credentials to a JSON file |
+| `save` | Fetch and save Overcast playlists, feeds, and episodes |
+| `extend` | Download XML feeds and extract all tags and attributes |
+| `transcripts` | Download available transcripts for episodes |
+| `chapters` | Download and store available chapters for episodes |
+| `html` | Generate HTML pages for played, starred, and deleted episodes |
+| `all` | Run save, extend, transcripts, and chapters sequentially |
+| `stats` | Show listening statistics |
+| `search` | Search episodes, feeds, and chapters using full-text search |
+
+Run `overcast-to-sqlite --help` for a full list of options.
 
 ## Authentication
 
@@ -45,7 +73,7 @@ By default, this saves to `overcast.db` but this can be manually set.
 
     $ overcast-to-sqlite save someother.db
 
-By default, it will attempt to use the info in `auth.json` file is present it will use the cookie from that file. You can point to a different location using `-a`:
+By default, it will use the cookie from `auth.json` if present. You can point to a different location using `-a`:
 
     $ overcast-to-sqlite save -a /path/to/auth.json
 
@@ -79,21 +107,111 @@ Any suggestions for improving on these caveats are welcome, please [open an issu
 
 ## Downloading transcripts
 
-The `transcripts` command that will download the transcripts if available.
+The `transcripts` command downloads available transcripts for episodes.
 
 The `save` and `extend` commands MUST be run prior to this.
 
-Episodes with a "podcast:transcript:url" value will be downloaded from that URL and the download's location will then be stored in "transcriptDownloadPath". 
+Episodes with a "podcast:transcript:url" value will be downloaded from that URL and the download's location will then be stored in "transcriptDownloadPath".
 
     $ overcast-to-sqlite transcripts
 
-Like previous commands, by default this will save transcripts to `archive/transcripts/<feed title>/<episode title>` by default.
+By default this will save transcripts to `archive/transcripts/<feed title>/<episode title>`.
 
 A different path can be set with the `-p`/`--path` flag.
 
 It also supports the `-v` flag to print additional information.
 
 There is also a `-s` flag to only download transcripts for starred episodes.
+
+## Downloading chapters
+
+The `chapters` command downloads and stores available chapters for episodes. The `save` and `extend` commands MUST be run prior to this.
+
+    $ overcast-to-sqlite chapters
+
+By default, chapters are archived to `archive/` adjacent to the database file. A different path can be set with the `-p`/`--path` flag.
+
+## Generating HTML pages
+
+The `html` command generates static HTML pages for recently played, starred, and deleted episodes.
+
+    $ overcast-to-sqlite html
+
+This produces three files: `overcast-played.html`, `overcast-starred.html`, and `overcast-deleted.html` in the same directory as the database file.
+
+A different output directory can be set with the `-o`/`--output` flag:
+
+    $ overcast-to-sqlite html -o /path/to/output/
+
+The directory passed to `--output` is created if it does not already exist.
+
+## Running all commands
+
+The `all` command runs `save`, `extend`, `transcripts`, and `chapters` sequentially in a single invocation:
+
+    $ overcast-to-sqlite all
+
+It supports the same `-a`/`--auth` and `-v`/`--verbose` flags as `save`.
+
+## Listening statistics
+
+The `stats` command shows a summary of your listening habits:
+
+    $ overcast-to-sqlite stats
+
+This displays total episodes played, total listening time, starred episodes, subscribed/removed feeds, and top podcasts ranked by episode count and listening time.
+
+## Searching
+
+The `search` command performs full-text search across episodes, feeds, and chapters. The `save` and `extend` commands must be run prior to this.
+
+    $ overcast-to-sqlite search "machine learning"
+
+Results are grouped by category (episodes, feeds, chapters). Use `--limit` / `-l` to control the maximum results per category (default: 20).
+
+    $ overcast-to-sqlite search "interview" -l 5
+
+## Database schema
+
+### Core tables
+
+| Table | Primary Key | Description |
+|-------|------------|-------------|
+| `feeds` | `overcastId` | Podcast feed metadata from Overcast |
+| `episodes` | `overcastId` | Episode metadata and listening history |
+| `playlists` | `title` | User-created playlists |
+| `feeds_extended` | `xmlUrl` | Full RSS feed metadata (from `extend`) |
+| `episodes_extended` | `enclosureUrl` | Full episode metadata from RSS (from `extend`) |
+| `chapters` | (auto) | Episode chapter markers (from `chapters`) |
+
+### Key columns
+
+**feeds**: `overcastId`, `title`, `subscribed`, `overcastAddedDate`, `notifications`, `xmlUrl`, `htmlUrl`, `dateRemoveDetected`
+
+**episodes**: `overcastId`, `feedId` (FK to feeds), `title`, `url`, `overcastUrl`, `played`, `progress` (seconds), `enclosureUrl`, `userUpdatedDate`, `userRecommendedDate` (starred date), `pubDate`, `userDeleted`
+
+**feeds_extended**: `xmlUrl` (FK to feeds), `title`, `description`, `lastUpdated`, `link`, `guid`, plus dynamic columns from RSS XML
+
+**episodes_extended**: `enclosureUrl` (FK to episodes), `feedXmlUrl` (FK to feeds_extended), `title`, `description`, `link`, `guid`, plus dynamic columns from RSS XML
+
+**chapters**: `enclosureUrl` (FK to episodes), `guid`, `source`, `time` (seconds), `content`, `url`, `image`
+
+### Views
+
+| View | Description |
+|------|-------------|
+| `episodes_played` | Episodes where `played=1` or `progress > 300` |
+| `episodes_starred` | Episodes with a `userRecommendedDate` |
+| `episodes_deleted` | Episodes marked deleted but not played |
+
+### Full-text search indexes
+
+FTS5 indexes are available on:
+- `feeds_extended` (`title`, `description`)
+- `episodes_extended` (`title`, `description`)
+- `chapters` (`content`)
+
+These are queried by the `search` command, or directly via SQL with `MATCH` syntax.
 
 ## See also
 
@@ -111,15 +229,21 @@ Pull requests are very welcome! For major changes, please open an issue first to
 ```bash
 git clone git@github.com:hbmartin/overcast-to-sqlite.git
 cd overcast-to-sqlite
-python3 -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
-python -m overcast_to_sqlite.cli all -v
+uv sync --dev
+uv run overcast-to-sqlite all -v
 ```
 
-### Code Formatting
+### Code Formatting and Linting
 
-This project is linted with [ruff](https://docs.astral.sh/ruff/) and uses [Black](https://github.com/ambv/black) code formatting.
+```bash
+uv run black overcast_to_sqlite
+uv run ruff check overcast_to_sqlite --fix
+uv run pyrefly check overcast_to_sqlite
+uv run ty check overcast_to_sqlite
+uv run pytest tests/
+```
+
+This project is linted and formatted with [ruff](https://docs.astral.sh/ruff/). Type checking is done with [pyrefly](https://github.com/facebook/pyrefly) and [ty](https://github.com/astral-sh/ty).
 
 ## Authors
 

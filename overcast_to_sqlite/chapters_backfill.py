@@ -1,7 +1,12 @@
+from __future__ import annotations
+
 from concurrent.futures import ThreadPoolExecutor
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 from podcast_chapter_tools.entities import ChapterType
+
+if TYPE_CHECKING:
+    from pathlib import Path
 from podcast_chapter_tools.extractors import (
     extract_description_chapters,
     extract_psc_chapters_from_file,
@@ -40,13 +45,16 @@ def backfill_chapters_pci(db: Datastore, chapters_path: Path) -> None:
         podcast: tuple[str, str, str, str],
     ) -> None | list[tuple[str, str, str, int, str, str | None, str | None]]:
         enc_url, guid, title, chap_url = podcast
-        extracted = get_and_extract_pci_chapters(
-            url=chap_url,
-            headers=_headers_ua(),
-            archive_path_json=chapters_path / f"{_sanitize_for_path(title)}.json",
-        )
-        if extracted is not None:
-            return [(enc_url, guid, ChapterType.PCI.value, *c) for c in extracted]
+        try:
+            extracted = get_and_extract_pci_chapters(
+                url=chap_url,
+                headers=_headers_ua(),
+                archive_path_json=chapters_path / f"{_sanitize_for_path(title)}.json",
+            )
+            if extracted is not None:
+                return [(enc_url, guid, ChapterType.PCI.value, *c) for c in extracted]
+        except Exception as e:  # noqa: BLE001
+            print(f"Error fetching PCI chapters for {title}: {e}")
         return None
 
     no_pci_chapters = list(db.get_no_pci_chapters())

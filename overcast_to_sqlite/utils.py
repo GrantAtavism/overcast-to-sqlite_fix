@@ -1,7 +1,12 @@
+from __future__ import annotations
+
 import random
-from collections.abc import Mapping
 from mimetypes import guess_extension
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
 
 import dateutil
 
@@ -39,7 +44,7 @@ def _sanitize_for_path(s: str) -> str:
 
 
 def _file_extension_for_type(headers: Mapping, fallback: str) -> str:
-    content_type = fallback.split(";")[0]
+    content_type = fallback.split(";", maxsplit=1)[0]
     try:
         unsafe_content_type: str | None = headers.get("content-type")
         if (
